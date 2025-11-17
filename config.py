@@ -17,3 +17,5 @@ class VectorSettings(BaseSettings):
 def get_settings() -> VectorSettings:
     """返回缓存的配置实例，便于依赖注入。"""
     return VectorSettings()  # BaseSettings 会缓存环境变量读取
+
+
