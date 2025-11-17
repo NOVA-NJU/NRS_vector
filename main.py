@@ -1,6 +1,6 @@
 """提供独立向量存储服务的 FastAPI 应用。"""
 from fastapi import FastAPI
-from .config import settings
+from config import settings
 import uvicorn
 from router import router as vector_router
 
