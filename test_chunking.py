@@ -67,23 +67,22 @@ async def main():
     print(f"✓ 存储状态: {result.status}")
     
     # 检查生成的块
-    doc_keys = list(vector_service._documents.keys())
-    chunk_keys = [k for k in doc_keys if "chunk" in k]
-    
-    if chunk_keys:
-        print(f"\n✓ 启用了分块，生成了 {len(chunk_keys)} 个文本块:")
-        for i, key in enumerate(chunk_keys[:3]):  # 只显示前3个
-            chunk = vector_service._documents[key]
+    collection = vector_service._get_or_create_collection()
+    chunks_data = collection.get(where={"parent_doc": payload.document_id}, include=["documents", "metadatas"]) 
+    if chunks_data.get("ids"):
+        print(f"\n✓ 启用了分块，生成了 {len(chunks_data['ids'])} 个文本块:")
+        for i, key in enumerate(chunks_data["ids"][:3]):
+            doc_text = chunks_data["documents"][i]
+            meta = chunks_data["metadatas"][i]
             print(f"  块 {i+1} [{key}]:")
-            print(f"    长度: {len(chunk.text)} 字符")
-            print(f"    元数据: parent_doc={chunk.metadata.get('parent_doc')}, "
-                  f"chunk_index={chunk.metadata.get('chunk_index')}, "
-                  f"total_chunks={chunk.metadata.get('total_chunks')}")
-            print(f"    内容预览: {chunk.text[:60]}...")
+            print(f"    长度: {len(doc_text)} 字符")
+            print(f"    元数据: parent_doc={meta.get('parent_doc')}, chunk_index={meta.get('chunk_index')}, total_chunks={meta.get('total_chunks')}")
+            print(f"    内容预览: {doc_text[:60]}...")
     else:
+        full_data = collection.get(ids=[payload.document_id], include=["documents"]) 
         print(f"\n✓ 未启用分块，存储为完整文档")
-        print(f"  文档ID: {doc_keys[0]}")
-        print(f"  文本长度: {len(vector_service._documents[doc_keys[0]].text)} 字符")
+        print(f"  文档ID: {payload.document_id}")
+        print(f"  文本长度: {len(full_data['documents'][0])} 字符")
     
     print("\n" + "=" * 60)
     print("测试 2: 语义搜索")
@@ -106,11 +105,12 @@ async def main():
         if "parent_doc" in match.metadata:
             print(f"    父文档: {match.metadata['parent_doc']}")
             print(f"    块索引: {match.metadata['chunk_index']}/{match.metadata['total_chunks']}")
-        doc = vector_service._documents[match.document_id]
+        doc_data = collection.get(ids=[match.document_id], include=["documents"]) 
+        doc_text = doc_data["documents"][0] if doc_data.get("documents") else ""
         if i == 0:
-            print(f"    内容详情: {doc.text[:500]}")
+            print(f"    内容详情: {doc_text[:500]}")
         else:
-            print(f"    内容预览: {doc.text[:100]}...")
+            print(f"    内容预览: {doc_text[:100]}...")
 
     print("\n" + "=" * 60)
     print("测试完成！")
