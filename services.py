@@ -11,7 +11,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import VectorSettings, get_settings
 import chromadb
 from chromadb.config import Settings as ChromaSettings
-from models import DocumentPayload, DocumentUpsertResponse, VectorMatch, VectorSearchRequest, VectorSearchResponse
+from models import DocumentPayload, DocumentUpsertResponse, VectorMatch, VectorSearchRequest, VectorSearchResponse, DocumentGetResponse, DocumentChunk, ClearDbResponse
 
  
 
@@ -78,6 +78,14 @@ class VectorService:
             name="documents",
             metadata={"hnsw:space": "cosine"},
         )
+
+    def exists(self, document_id: str) -> bool:
+        collection = self._get_or_create_collection()
+        res = collection.get(ids=[document_id])
+        if res and res.get("ids"):
+            return True
+        chunk_res = collection.get(where={"parent_doc": document_id})
+        return bool(chunk_res and chunk_res.get("ids"))
 
     def _init_embedder(self) -> SentenceTransformer:
         """加载文本嵌入模型（把文字转换成数字向量的AI模型）。
@@ -193,63 +201,6 @@ class VectorService:
         # 过滤掉空白块
         return [chunk.strip() for chunk in chunks if chunk.strip()]
 
-    # TODO (feat/embedder-chunker):
-    # 文本分块（Chunking）功能应该在这里集成！
-    # 
-    # 为什么需要分块?
-    # - 长文档（如论文、书籍章节）如果整体向量化，会损失细节信息
-    # - 嵌入模型通常有最大输入长度限制（如 512 个 token）
-    # - 分块后的小段落能提供更精准的匹配结果
-    #
-    # 建议的实现位置和方式:
-    # 1. 在 `upsert_document()` 方法内部，接收到 payload.text 后：
-    #    - 如果文本超过阈值（如 500 字符），触发分块逻辑
-    #    - 调用分块函数（如 _chunk_text()）将长文本切分成多个小块
-    #    - 为每个块生成子文档ID（如 "doc_001_chunk_0", "doc_001_chunk_1"）
-    #    - 分别存储每个块的向量和内容
-    #
-    # 2. 分块策略可选方案:
-    #    - 固定长度分块: 每 N 个字符一块
-    #    - 滑动窗口分块: 重叠一定比例，避免语义割裂
-    #    - 语义分块: 按句子、段落等自然边界切分
-    #    - 使用 LangChain 的 TextSplitter 工具
-    #
-    # 3. 搜索时的调整:
-    #    - 在 `search()` 方法中，需要考虑同一文档的多个块可能都被匹配
-    #    - 可以按原始文档ID聚合结果，取最高分或平均分
-    #
-    # 4. 建议新增的辅助方法:
-    #    def _chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
-    #        \"\"\"将长文本切分成多个重叠的块。\"\"\"
-    #        # 实现固定长度 + 重叠的分块逻辑
-    #        pass
-    #
-    # 5. 配置项建议 (config.py):
-    #    - CHUNK_SIZE: 每块的字符数
-    #    - CHUNK_OVERLAP: 块之间的重叠字符数
-    #    - ENABLE_CHUNKING: 是否启用分块（布尔值）
-    #
-    # 示例实现框架:
-    # async def upsert_document(self, payload: DocumentPayload) -> DocumentUpsertResponse:
-    #     if self.settings.enable_chunking and len(payload.text) > self.settings.chunk_size:
-    #         # 分块模式
-    #         chunks = self._chunk_text(payload.text)
-    #         for idx, chunk in enumerate(chunks):
-    #             chunk_id = f"{payload.document_id}_chunk_{idx}"
-    #             embedding = self._embed_texts([chunk])[0]
-    #             self._documents[chunk_id] = DocumentPayload(
-    #                 document_id=chunk_id,
-    #                 text=chunk,
-    #                 metadata={**payload.metadata, "parent_doc": payload.document_id, "chunk_index": idx}
-    #             )
-    #             self._embeddings[chunk_id] = embedding
-    #     else:
-    #         # 原有逻辑：整体向量化
-    #         embedding = self._embed_texts([payload.text])[0]
-    #         self._documents[payload.document_id] = payload
-    #         self._embeddings[payload.document_id] = embedding
-    #     return DocumentUpsertResponse(document_id=payload.document_id, status="stored")
-
     async def upsert_document(self, payload: DocumentPayload) -> DocumentUpsertResponse:
         """添加或更新一个文档到向量库。
         
@@ -291,12 +242,15 @@ class VectorService:
                 ids.append(chunk_id)
                 embeddings.append(embedding.tolist())
                 documents.append(chunk)
-                metadatas.append({
+                meta = {
                     **payload.metadata,
                     "parent_doc": payload.document_id,
                     "chunk_index": idx,
                     "total_chunks": len(chunks),
-                })
+                }
+                if payload.url is not None:
+                    meta["url"] = payload.url
+                metadatas.append(meta)
             collection.upsert(
                 ids=ids,
                 embeddings=embeddings,
@@ -305,11 +259,14 @@ class VectorService:
             )
         else:
             embedding = self._embed_texts([payload.text])[0]
+            meta = {**payload.metadata}
+            if payload.url is not None:
+                meta["url"] = payload.url
             collection.upsert(
                 ids=[payload.document_id],
                 embeddings=[embedding.tolist()],
                 documents=[payload.text],
-                metadatas=[payload.metadata],
+                metadatas=[meta],
             )
         
         # 返回成功响应（无论是否分块，都返回原始文档ID）
@@ -341,12 +298,13 @@ class VectorService:
         results = collection.query(
             query_embeddings=[query_embedding.tolist()],
             n_results=request.top_k,
-            include=["metadatas", "distances"],
+            include=["metadatas", "distances", "documents"],
         )
         matches: List[VectorMatch] = []
         ids_list = results.get("ids", [[]])
         distances_list = results.get("distances", [[]])
         metadatas_list = results.get("metadatas", [[]])
+        documents_list = results.get("documents", [[]])
         if ids_list and len(ids_list) > 0:
             for i in range(len(ids_list[0])):
                 doc_id = ids_list[0][i]
@@ -354,8 +312,63 @@ class VectorService:
                 raw_score = 1 - float(distance)
                 score = round(raw_score, 4)
                 metadata = metadatas_list[0][i] if metadatas_list and len(metadatas_list) > 0 else {}
+                content = documents_list[0][i] if documents_list and len(documents_list) > 0 else None
+                url = metadata.get("url")
+                if content is not None:
+                    metadata = {**metadata, "content": content}
+                if "url" not in metadata:
+                    metadata["url"] = url
                 matches.append(VectorMatch(document_id=doc_id, score=score, metadata=metadata))
+        else:
+            fallback = collection.get(where_document={"$contains": request.query}, include=["documents", "metadatas"]) 
+            f_ids = fallback.get("ids") or []
+            f_docs = fallback.get("documents") or []
+            f_metas = fallback.get("metadatas") or []
+            for i, doc_id in enumerate(f_ids[: request.top_k]):
+                meta = f_metas[i] if i < len(f_metas) else {}
+                doc_text = f_docs[i] if i < len(f_docs) else None
+                if doc_text is not None:
+                    meta = {**meta, "content": doc_text}
+                matches.append(VectorMatch(document_id=doc_id, score=0.0, metadata=meta))
         return VectorSearchResponse(results=matches, query=request.query, top_k=request.top_k)
+
+    async def get_document_by_id(self, document_id: str) -> DocumentGetResponse:
+        collection = self._get_or_create_collection()
+        res = collection.get(ids=[document_id], include=["documents", "metadatas"]) 
+        ids = res.get("ids") or []
+        if ids:
+            return DocumentGetResponse(
+                document_id=document_id,
+                content=(res.get("documents") or [None])[0],
+                metadata=(res.get("metadatas") or [{}])[0],
+            )
+        chunks = collection.get(where={"parent_doc": document_id}, include=["documents", "metadatas"]) 
+        chunk_ids = chunks.get("ids") or []
+        if not chunk_ids:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="document not found")
+        docs = chunks.get("documents") or []
+        metas = chunks.get("metadatas") or []
+        items: List[tuple] = []
+        for i, cid in enumerate(chunk_ids):
+            m = metas[i] if i < len(metas) else {}
+            idx = m.get("chunk_index", i)
+            items.append((idx, cid, docs[i] if i < len(docs) else "", m))
+        items.sort(key=lambda x: x[0])
+        out_chunks: List[DocumentChunk] = [DocumentChunk(chunk_id=cid, content=doc, metadata=m) for _, cid, doc, m in items]
+        joined_content = "".join([doc for _, _, doc, _ in items if isinstance(doc, str)])
+        base_meta = items[0][3] if items else {}
+        parent_meta = {k: v for k, v in base_meta.items() if k not in ("chunk_index", "total_chunks")}
+        parent_meta["chunk_count"] = len(out_chunks)
+        return DocumentGetResponse(document_id=document_id, content=joined_content, chunks=out_chunks, metadata=parent_meta)
+
+    async def clear_db(self) -> ClearDbResponse:
+        try:
+            self._client.delete_collection("documents")
+        except Exception:
+            pass
+        self._get_or_create_collection()
+        return ClearDbResponse(status="cleared")
 
 
 vector_service = VectorService()

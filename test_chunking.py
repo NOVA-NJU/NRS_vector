@@ -58,7 +58,7 @@ async def main():
     payload = DocumentPayload(
         document_id="nova_recruitment_2025",
         text=test_text,
-        metadata={"source": "微信公众号", "category": "社团招新"}
+        metadata={"source": "微信公众号", "category": "社团招新", "url": "https://nova.yuque.com"}
     )
     
     # 存储文档（如果启用分块会自动切分）

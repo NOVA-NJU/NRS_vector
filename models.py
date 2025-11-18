@@ -37,6 +37,8 @@ class DocumentPayload(BaseModel):
     # default_factory=dict 表示如果不提供这个字段，就用空字典作为默认值
     # 元数据可以存储任何额外信息，比如来源、作者、日期等
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    url: Optional[str] = Field(default=None, description="文档来源链接")
+    # 根据当前的最小目标而言可以要求必须，出于未来扩展采用了可选，反正是自己测也没啥吧，大概（
 
 
 class VectorSearchRequest(BaseModel):
@@ -118,3 +120,20 @@ class DocumentUpsertResponse(BaseModel):
     # Optional[str] 表示这个字段可以是字符串或 None
     # 可以用来存储额外的说明信息或错误信息
     detail: Optional[str] = None
+
+
+class DocumentChunk(BaseModel):
+    chunk_id: str
+    content: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentGetResponse(BaseModel):
+    document_id: str
+    content: Optional[str] = None
+    chunks: Optional[List[DocumentChunk]] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ClearDbResponse(BaseModel):
+    status: str
