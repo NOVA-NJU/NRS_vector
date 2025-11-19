@@ -58,17 +58,18 @@ async def main():
     payload = DocumentPayload(
         document_id="nova_recruitment_2025",
         text=test_text,
-        metadata={"source": "微信公众号", "category": "社团招新"}
+        metadata={"source": "微信公众号", "category": "社团招新", "url": "https://nova.yuque.com"}
     )
     
     # 存储文档（如果启用分块会自动切分）
     result = await vector_service.upsert_document(payload)
+    stored_id = result.document_id
     print(f"✓ 文档存储成功: {result.document_id}")
     print(f"✓ 存储状态: {result.status}")
     
     # 检查生成的块
     collection = vector_service._get_or_create_collection()
-    chunks_data = collection.get(where={"parent_doc": payload.document_id}, include=["documents", "metadatas"]) 
+    chunks_data = collection.get(where={"parent_doc": stored_id}, include=["documents", "metadatas"]) 
     if chunks_data.get("ids"):
         print(f"\n✓ 启用了分块，生成了 {len(chunks_data['ids'])} 个文本块:")
         for i, key in enumerate(chunks_data["ids"][:3]):
@@ -79,10 +80,11 @@ async def main():
             print(f"    元数据: parent_doc={meta.get('parent_doc')}, chunk_index={meta.get('chunk_index')}, total_chunks={meta.get('total_chunks')}")
             print(f"    内容预览: {doc_text[:60]}...")
     else:
-        full_data = collection.get(ids=[payload.document_id], include=["documents"]) 
+        full_data = collection.get(ids=[stored_id], include=["documents"]) 
         print(f"\n✓ 未启用分块，存储为完整文档")
-        print(f"  文档ID: {payload.document_id}")
-        print(f"  文本长度: {len(full_data['documents'][0])} 字符")
+        print(f"  文档ID: {stored_id}")
+        docs = full_data.get("documents") or []
+        print(f"  文本长度: {len(docs[0]) if docs else 0} 字符")
     
     print("\n" + "=" * 60)
     print("测试 2: 语义搜索")

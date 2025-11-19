@@ -14,7 +14,7 @@ from router import router as vector_router
 # 创建 FastAPI 应用实例
 # title: 应用名称，会显示在自动生成的 API 文档中
 # version: 版本号
-app = FastAPI(title="Vector Store Service", version="0.1.0")
+app = FastAPI(title="Vector Store Service", version="0.3.1")
 
 # 挂载向量相关的路由
 # prefix="/vectors": 所有路由都会以 /vectors 开头，例如 /vectors/search
