@@ -9,6 +9,8 @@ from sentence_transformers.util import cos_sim
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import VectorSettings, get_settings
+import os
+import json
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 from models import DocumentPayload, DocumentUpsertResponse, VectorMatch, VectorSearchRequest, VectorSearchResponse, DocumentGetResponse, DocumentChunk, ClearDbResponse
@@ -28,7 +30,7 @@ class VectorService:
     
     属性:
         settings (VectorSettings): 向量服务相关配置。
-        _client (Any): 向量数据库客户端实例（当前为字符串占位）。
+        _client (Any): 向量数据库客户端实例。
         _embedder (SentenceTransformer): 文本嵌入模型实例。
     
     方法:
@@ -49,7 +51,7 @@ class VectorService:
         
         初始化步骤:
             1. 保存配置到 self.settings
-            2. 初始化数据库客户端（当前为占位）
+            2. 初始化数据库客户端
             3. 加载嵌入模型（SentenceTransformer）
             4. 创建内存缓存字典，用于存储文档和向量
         """
@@ -78,6 +80,21 @@ class VectorService:
             name="documents",
             metadata={"hnsw:space": "cosine"},
         )
+    def _allocate_id(self) -> str:
+        os.makedirs(self.settings.db_path, exist_ok=True)
+        counter_path = os.path.join(self.settings.db_path, "counter.json")
+        cur = 0
+        if os.path.exists(counter_path):
+            try:
+                with open(counter_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    cur = int(data.get("value", 0))
+            except Exception:
+                cur = 0
+        nxt = cur + 1
+        with open(counter_path, "w", encoding="utf-8") as f:
+            json.dump({"value": nxt}, f)
+        return str(nxt)
 
     def exists(self, document_id: str) -> bool:
         collection = self._get_or_create_collection()
@@ -226,7 +243,8 @@ class VectorService:
             如果文档ID已存在就更新，不存在就插入，一个操作搞定两件事
         """
         collection = self._get_or_create_collection()
-        if self.settings.enable_chunking and len(payload.text) > self.settings.chunk_size:
+        base_id = self._allocate_id()
+        if len(payload.text) > self.settings.chunk_size:
             chunks = self._chunk_text(
                 payload.text,
                 self.settings.chunk_size,
@@ -237,14 +255,14 @@ class VectorService:
             documents: List[str] = []
             metadatas: List[Dict] = []
             for idx, chunk in enumerate(chunks):
-                chunk_id = f"{payload.document_id}_chunk_{idx}"
+                chunk_id = f"{base_id}_chunk_{idx}"
                 embedding = self._embed_texts([chunk])[0]
                 ids.append(chunk_id)
                 embeddings.append(embedding.tolist())
                 documents.append(chunk)
                 meta = {
                     **payload.metadata,
-                    "parent_doc": payload.document_id,
+                    "parent_doc": base_id,
                     "chunk_index": idx,
                     "total_chunks": len(chunks),
                 }
@@ -263,14 +281,12 @@ class VectorService:
             if payload.url is not None:
                 meta["url"] = payload.url
             collection.upsert(
-                ids=[payload.document_id],
+                ids=[base_id],
                 embeddings=[embedding.tolist()],
                 documents=[payload.text],
                 metadatas=[meta],
             )
-        
-        # 返回成功响应（无论是否分块，都返回原始文档ID）
-        return DocumentUpsertResponse(document_id=payload.document_id, status="stored")
+        return DocumentUpsertResponse(document_id=base_id, status="stored")
 
     async def search(self, request: VectorSearchRequest) -> VectorSearchResponse:
         """根据查询语句搜索最相似的文档。
@@ -314,11 +330,9 @@ class VectorService:
                 metadata = metadatas_list[0][i] if metadatas_list and len(metadatas_list) > 0 else {}
                 content = documents_list[0][i] if documents_list and len(documents_list) > 0 else None
                 url = metadata.get("url")
-                if content is not None:
-                    metadata = {**metadata, "content": content}
                 if "url" not in metadata:
                     metadata["url"] = url
-                matches.append(VectorMatch(document_id=doc_id, score=score, metadata=metadata))
+                matches.append(VectorMatch(document_id=doc_id, score=score, text=content, metadata=metadata))
         else:
             fallback = collection.get(where_document={"$contains": request.query}, include=["documents", "metadatas"]) 
             f_ids = fallback.get("ids") or []
@@ -327,9 +341,7 @@ class VectorService:
             for i, doc_id in enumerate(f_ids[: request.top_k]):
                 meta = f_metas[i] if i < len(f_metas) else {}
                 doc_text = f_docs[i] if i < len(f_docs) else None
-                if doc_text is not None:
-                    meta = {**meta, "content": doc_text}
-                matches.append(VectorMatch(document_id=doc_id, score=0.0, metadata=meta))
+                matches.append(VectorMatch(document_id=doc_id, score=0.0, text=doc_text, metadata=meta))
         return VectorSearchResponse(results=matches, query=request.query, top_k=request.top_k)
 
     async def get_document_by_id(self, document_id: str) -> DocumentGetResponse:
@@ -339,11 +351,15 @@ class VectorService:
         if ids:
             return DocumentGetResponse(
                 document_id=document_id,
-                content=(res.get("documents") or [None])[0],
+                text=(res.get("documents") or [None])[0],
                 metadata=(res.get("metadatas") or [{}])[0],
             )
         chunks = collection.get(where={"parent_doc": document_id}, include=["documents", "metadatas"]) 
         chunk_ids = chunks.get("ids") or []
+        if not chunk_ids and document_id.isdigit():
+            # 兼容早期数据将 parent_doc 以整数类型写入的情况
+            chunks = collection.get(where={"parent_doc": int(document_id)}, include=["documents", "metadatas"]) 
+            chunk_ids = chunks.get("ids") or []
         if not chunk_ids:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="document not found")
@@ -355,12 +371,12 @@ class VectorService:
             idx = m.get("chunk_index", i)
             items.append((idx, cid, docs[i] if i < len(docs) else "", m))
         items.sort(key=lambda x: x[0])
-        out_chunks: List[DocumentChunk] = [DocumentChunk(chunk_id=cid, content=doc, metadata=m) for _, cid, doc, m in items]
+        out_chunks: List[DocumentChunk] = [DocumentChunk(chunk_id=cid, text=doc, metadata=m) for _, cid, doc, m in items]
         joined_content = "".join([doc for _, _, doc, _ in items if isinstance(doc, str)])
         base_meta = items[0][3] if items else {}
         parent_meta = {k: v for k, v in base_meta.items() if k not in ("chunk_index", "total_chunks")}
         parent_meta["chunk_count"] = len(out_chunks)
-        return DocumentGetResponse(document_id=document_id, content=joined_content, chunks=out_chunks, metadata=parent_meta)
+        return DocumentGetResponse(document_id=document_id, text=joined_content, chunks=out_chunks, metadata=parent_meta)
 
     async def clear_db(self) -> ClearDbResponse:
         try:
@@ -368,6 +384,12 @@ class VectorService:
         except Exception:
             pass
         self._get_or_create_collection()
+        try:
+            counter_path = os.path.join(self.settings.db_path, "counter.json")
+            if os.path.exists(counter_path):
+                os.remove(counter_path)
+        except Exception:
+            pass
         return ClearDbResponse(status="cleared")
 
 

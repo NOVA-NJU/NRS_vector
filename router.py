@@ -42,10 +42,14 @@ async def search_vectors(request: VectorSearchRequest) -> VectorSearchResponse:
         POST /vectors/search
         {
             "query": "图书馆开放时间",
-            "top_k": 3
+            "top_k": 5
         }
     """
     # 直接调用服务层的搜索方法，保持路由层简洁
+    return await vector_service.search(request)
+
+@router.post("/search/", response_model=VectorSearchResponse, include_in_schema=False)
+async def search_vectors_trailing(request: VectorSearchRequest) -> VectorSearchResponse:
     return await vector_service.search(request)
 
 
@@ -81,9 +85,12 @@ async def add_document(payload: DocumentPayload) -> DocumentUpsertResponse:
     示例:
         POST /vectors/documents
         {
-            "document_id": "doc_001",
-            "text": "南京大学图书馆上午8点开放",
-            "metadata": {"source": "官网", "date": "2025-01-01"}
+            "text": "南京大学仙林校区图书馆上午8点开放",
+            "url": "https://example.com/post/123",
+            "metadata": {
+                "source": "官网",
+                "category": "校园服务"
+            }
         }
     """
     # 直接调用服务层的文档写入方法

@@ -12,8 +12,8 @@
 前端/客户端必须按照这个格式发送数据，后端也按这个格式返回数据。
 """
 from typing import Any, Dict, List, Optional
-
 from pydantic import BaseModel, Field
+from config import VectorSettings
 
 
 class DocumentPayload(BaseModel):
@@ -23,10 +23,8 @@ class DocumentPayload(BaseModel):
     当用户想要向向量库添加文档时，就要按照这个格式提供数据。
     """
 
-    # document_id: 文档的唯一标识符
     # ... 表示这是必填字段，不能省略
     # description 会显示在 API 文档中，帮助使用者理解这个字段的含义
-    document_id: str = Field(..., description="文档的唯一标识")
     
     # text: 文档的原始文本内容，这是最重要的字段
     # 这个文本会被转换成向量用于后续搜索
@@ -57,7 +55,7 @@ class VectorSearchRequest(BaseModel):
     # 默认值是 5，表示返回最相似的 5 个文档
     # ge=1 表示 greater than or equal，最小值是 1
     # le=50 表示 less than or equal，最大值是 50
-    top_k: int = Field(5, ge=1, le=50, description="需要返回的结果数量")
+    top_k: int = Field(VectorSettings().default_top_k, ge=1, le=50, description="需要返回的结果数量")
 
 
 class VectorMatch(BaseModel):
@@ -79,6 +77,7 @@ class VectorMatch(BaseModel):
     
     # metadata: 文档的元数据
     # 搜索时会把存储时提供的元数据一起返回
+    text: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -124,13 +123,13 @@ class DocumentUpsertResponse(BaseModel):
 
 class DocumentChunk(BaseModel):
     chunk_id: str
-    content: str
+    text: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DocumentGetResponse(BaseModel):
     document_id: str
-    content: Optional[str] = None
+    text: Optional[str] = None
     chunks: Optional[List[DocumentChunk]] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 

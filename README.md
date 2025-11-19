@@ -83,7 +83,7 @@ NRS_vector/
    VECTOR_chunk_size=500         # 每块字符数
    VECTOR_chunk_overlap=50       # 块间重叠字符数
    
-   # 数据库配置（用于未来的 feat/db-crud 分支）
+   # 数据库配置
    VECTOR_DB_PATH=./chroma_db
    ```
 
@@ -106,8 +106,8 @@ NRS_vector/
 **请求体**:
 ```json
 {
-  "document_id": "doc_001",
   "text": "南京大学仙林校区图书馆上午8点开放",
+  "url": "https://example.com/post/123",
   "metadata": {
     "source": "官网",
     "category": "校园服务"
@@ -118,7 +118,7 @@ NRS_vector/
 **响应**:
 ```json
 {
-  "document_id": "doc_001",
+  "document_id": "1",
   "status": "stored",
   "detail": null
 }
@@ -147,12 +147,14 @@ NRS_vector/
 {
   "results": [
     {
-      "document_id": "doc_001",
-      "score": 0.6163,
-      "metadata": {
-        "source": "官网",
-        "category": "校园服务"
-      }
+        "document_id": "1",
+        "score": 0.6163,
+        "text": "南京大学仙林校区图书馆上午8点开放",
+        "metadata": {
+            "category": "校园服务",
+            "url": "https://example.com/post/123",
+            "source": "官网"
+        }
     }
   ],
   "query": "图书馆几点开门",
@@ -182,9 +184,9 @@ import requests
 response = requests.post(
     "http://localhost:8000/vectors/documents",
     json={
-        "document_id": "doc_001",
         "text": "南京大学仙林校区图书馆上午8点开放",
-        "metadata": {"source": "官网"}
+        "url": "https://example.com/post/123",
+        "metadata": {"source": "官网", "category": "校园服务"}
     }
 )
 print(response.json())
@@ -194,7 +196,7 @@ response = requests.post(
     "http://localhost:8000/vectors/search",
     json={
         "query": "图书馆几点开门",
-        "top_k": 3
+        "top_k": 5
     }
 )
 print(response.json())
@@ -207,9 +209,9 @@ print(response.json())
 curl -X POST "http://localhost:8000/vectors/documents" \
   -H "Content-Type: application/json" \
   -d '{
-    "document_id": "doc_001",
     "text": "南京大学仙林校区图书馆上午8点开放",
-    "metadata": {"source": "官网"}
+    "url": "https://example.com/post/123",
+    "metadata": {"source": "官网", "category": "校园服务"}
   }'
 
 # 搜索文档
@@ -411,10 +413,9 @@ python test_chunking.py
 ## 注意事项
 
 1. **首次启动时间**: 首次运行会下载嵌入模型（约 150MB），需要一定时间
-2. **内存使用**: 当前所有文档和向量存储在内存中，重启后数据丢失（feat/db-crud 分支将解决）
-3. **模型选择**: `bge-small-zh-v1.5` 针对中文优化，如需处理英文可更换为 `all-MiniLM-L6-v2` 等模型
-4. **性能瓶颈**: 暴力搜索算法在大规模数据下性能有限，建议集成向量数据库（ChromaDB）
-5. **分块配置**: 
+2. **模型选择**: 使用 `BAAI/bge-small-zh-v1.5`（中文优化）；如需更换可在 `VECTOR_EMBEDDING_MODEL` 中指定，但默认保持该模型
+3. **性能瓶颈**: 暴力搜索算法在大规模数据下性能有限
+4. **分块配置**: 
    - `chunk_size` 建议范围 300-800 字符（过小损失语义，过大失去分块意义）
    - `chunk_overlap` 建议设为 chunk_size 的 5-20%
    - 环境变量名严格区分大小写（`enable_chunking` 而非 `ENABLE_CHUNKING`）
@@ -434,7 +435,7 @@ python test_chunking.py
 - 子文档元数据管理
 - 分块功能测试
 
-### Phase 3: 持久化存储 ✅（v0.3.0 - 已完成）
+### Phase 3: 持久化存储 ✅（v0.3.1 - 已完成）
 - ChromaDB 向量数据库集成
 - 文档数据持久化
 - 向量索引优化
@@ -479,6 +480,6 @@ python test_chunking.py
 ---
 
 **最后更新**: 2025-11-17  
-**当前版本**: v0.3.0 (开发阶段)  
+**当前版本**: v0.3.1 (开发阶段)  
 **当前分支**: dev  
 **下一个里程碑**: v0.4.0 (高级特性 - 计划中)
