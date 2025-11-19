@@ -34,7 +34,11 @@ async def search_vectors(request: VectorSearchRequest) -> VectorSearchResponse:
     
     返回:
         搜索结果对象，包含:
-            - results: 匹配的文档列表（按相似度从高到低排序）
+            - results: 匹配的文档列表（按相似度从高到低排序），每个结果包含:
+                * document_id: 文档ID
+                * score: 相似度分数
+                * text: 文档的完整文本内容
+                * metadata: 文档的元数据
             - query: 原始查询文本
             - top_k: 返回的结果数量
     

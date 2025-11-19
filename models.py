@@ -64,7 +64,8 @@ class VectorMatch(BaseModel):
     搜索返回的每个结果都是一个 VectorMatch 对象，包含:
     1. 文档ID
     2. 相似度分数
-    3. 文档的元数据
+    3. 文档的原始文本内容
+    4. 文档的元数据
     """
 
     # document_id: 匹配到的文档的ID
@@ -74,6 +75,10 @@ class VectorMatch(BaseModel):
     # 分数越高表示越相似
     # 例如: 0.95 表示非常相似，0.3 表示不太相似
     score: float
+    
+    # text: 文档的原始文本内容
+    # 返回匹配文档的完整文本，方便用户直接查看内容
+    text: str = Field(default="", description="文档的原始文本内容")
     
     # metadata: 文档的元数据
     # 搜索时会把存储时提供的元数据一起返回

@@ -166,7 +166,8 @@ NRS_vector/
   "results": [
     {
       "document_id": "doc_001",
-      "score": 0.6163,
+      "score": 0.8756,
+      "text": "南京大学仙林校区图书馆上午8点开放",
       "metadata": {
         "source": "官网",
         "category": "校园服务"
@@ -177,6 +178,12 @@ NRS_vector/
   "top_k": 5
 }
 ```
+
+**响应字段说明**：
+- `document_id`: 匹配文档的唯一标识
+- `score`: 相似度分数（0-1之间，越高越相似）
+- `text`: 文档的完整文本内容
+- `metadata`: 文档的元数据信息
 
 ### 3. 健康检查
 
@@ -215,7 +222,21 @@ response = requests.post(
         "top_k": 3
     }
 )
-print(response.json())
+results = response.json()
+# 输出示例：
+# {
+#   "results": [
+#     {
+#       "document_id": "doc_001",
+#       "score": 0.8756,
+#       "text": "南京大学仙林校区图书馆上午8点开放",
+#       "metadata": {"source": "官网"}
+#     }
+#   ],
+#   "query": "图书馆几点开门",
+#   "top_k": 3
+# }
+print(results)
 ```
 
 ### cURL 示例

@@ -512,11 +512,12 @@ class VectorService:
         results = collection.query(
             query_embeddings=[query_embedding.tolist()],
             n_results=request.top_k,
-            include=["metadatas", "distances"],
+            include=["documents", "metadatas", "distances"],
         )
         matches: List[VectorMatch] = []
         ids_list = results.get("ids", [[]])
         distances_list = results.get("distances", [[]])
+        documents_list = results.get("documents", [[]])
         metadatas_list = results.get("metadatas", [[]])
         if ids_list and len(ids_list) > 0:
             for i in range(len(ids_list[0])):
@@ -524,8 +525,9 @@ class VectorService:
                 distance = distances_list[0][i] if distances_list and len(distances_list) > 0 else 0.0
                 raw_score = 1 - float(distance)
                 score = round(raw_score, 4)
+                text = documents_list[0][i] if documents_list and len(documents_list) > 0 else ""
                 metadata = metadatas_list[0][i] if metadatas_list and len(metadatas_list) > 0 else {}
-                matches.append(VectorMatch(document_id=doc_id, score=score, metadata=metadata))
+                matches.append(VectorMatch(document_id=doc_id, score=score, text=text, metadata=metadata))
         return VectorSearchResponse(results=matches, query=request.query, top_k=request.top_k)
 
 
